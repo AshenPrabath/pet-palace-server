@@ -1,5 +1,6 @@
 const User = require('../models/User');
-const Pet = require('../models/Pet');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
 // User registration
 const registerUser = async (req, res) => {
@@ -12,13 +13,42 @@ const registerUser = async (req, res) => {
       return res.status(400).json({ message: 'User already exists' });
     }
 
-    const newUser = new User({ name, password, email, phone, city });
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const newUser = new User({ name, password: hashedPassword, email, phone, city });
     await newUser.save();
     res.status(201).json({ message: 'User registered successfully', user: newUser });
   } catch (error) {
     res.status(500).json({ message: 'Error registering user', error });
   }
 };
+
+const loginUser = async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid email or password' });
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ message: 'Invalid email or password' });
+    }
+
+    // Generate JWT
+    const token = jwt.sign({ id: user._id, role: 'user' }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    res.status(200).json({ message: 'Login successful', token });
+  } catch (error) {
+    console.error('Error during login:', error); // Log error to console
+    res.status(500).json({ message: 'Error during login', error: error.message }); // Send error message
+  }
+};
+
+
 const getAllUsers = async (req, res) => {
   try {
     // Find all users and populate the 'pets' field with full pet documents
@@ -31,4 +61,4 @@ const getAllUsers = async (req, res) => {
 };
 
 
-module.exports = { getAllUsers,registerUser };
+module.exports = { getAllUsers,registerUser,loginUser };

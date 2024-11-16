@@ -47,15 +47,19 @@ const getAvailableTimeSlots = async (doctorId, date) => {
 
 // Create an appointment
 const createAppointment = async (req, res) => {
-  const { userId, petId, doctorId, date, timeSlot } = req.body;
+  const { petId, doctorId, date, timeSlot } = req.body;
+  const userId = req.user.id; // Get the authenticated user's ID from the token
 
   try {
-    const user = await User.findById(userId);
+    // Check if the pet belongs to the authenticated user
     const pet = await Pet.findById(petId);
-    const doctor = await Doctor.findById(doctorId);
+    if (!pet || pet.owner.toString() !== userId) {
+      return res.status(403).json({ message: 'You can only create appointments for your own pets' });
+    }
 
-    if (!user || !pet || !doctor) {
-      return res.status(404).json({ message: 'User, Pet, or Doctor not found' });
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({ message: 'Doctor not found' });
     }
 
     const availableSlots = await getAvailableTimeSlots(doctorId, date);
@@ -86,38 +90,47 @@ const createAppointment = async (req, res) => {
   }
 };
 
+
 // Confirm or cancel an appointment (by the doctor)
 const updateAppointmentStatus = async (req, res) => {
-    const { appointmentId, status } = req.body;
+  const { appointmentId, status } = req.body;
+  const doctorId = req.user.id; // Get the authenticated doctor's ID from the token
 
-    try {
-        const appointment = await Appointment.findById(appointmentId);
-        if (!appointment) {
-            return res.status(404).json({ message: 'Appointment not found' });
-        }
-
-        // Only doctors can confirm/cancel/complete the appointment
-        if (status === 'confirmed' || status === 'cancelled' || status === 'completed') {
-            appointment.status = status;
-            await appointment.save();
-
-            // Restore the slot if cancelled or completed
-            if (status === 'cancelled' || status === 'completed') {
-                await DoctorAvailability.updateOne(
-                    { doctor: appointment.doctor, date: appointment.date },
-                    { $addToSet: { availableSlots: appointment.timeSlot } }
-                );
-            }
-
-            res.status(200).json({ message: `Appointment ${status}` });
-        } else {
-            res.status(400).json({ message: 'Invalid status' });
-        }
-    } catch (error) {
-        console.error('Error updating appointment:', error);
-        res.status(500).json({ message: 'Server error', error: error.message });
+  try {
+    // Find the appointment by ID
+    const appointment = await Appointment.findById(appointmentId);
+    if (!appointment) {
+      return res.status(404).json({ message: 'Appointment not found' });
     }
+
+    // Ensure that the authenticated doctor is assigned to the appointment
+    if (appointment.doctor.toString() !== doctorId) {
+      return res.status(403).json({ message: 'You are not authorized to update this appointment' });
+    }
+
+    // Only doctors can confirm, cancel, or complete the appointment
+    if (status === 'confirmed' || status === 'cancelled' || status === 'completed') {
+      appointment.status = status;
+      await appointment.save();
+
+      // Restore the slot if cancelled or completed
+      if (status === 'cancelled' || status === 'completed') {
+        await DoctorAvailability.updateOne(
+          { doctor: appointment.doctor, date: appointment.date },
+          { $addToSet: { availableSlots: appointment.timeSlot } }
+        );
+      }
+
+      res.status(200).json({ message: `Appointment ${status}` });
+    } else {
+      res.status(400).json({ message: 'Invalid status' });
+    }
+  } catch (error) {
+    console.error('Error updating appointment:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
 };
+
 const getAllAppointmentsByUserId = async (req, res) => {
     const { userId } = req.params;
 

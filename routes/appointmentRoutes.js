@@ -1,6 +1,7 @@
 // routes/appointmentRoutes.js
 const express = require('express');
 const { createAppointment, getAvailableTimeSlots, updateAppointmentStatus,getAllAppointmentsByUserId, getAllAppointmentsByDoctorId } = require('../controllers/appointmentController');
+const authenticateToken = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
@@ -22,10 +23,10 @@ router.get('/doctor/:doctorId/slots', async (req, res) => {
 });
 
 // Route to create an appointment
-router.post('/create', createAppointment);
+router.post('/create',authenticateToken, createAppointment);
 
 // Route to confirm or cancel an appointment
-router.patch('/update-status', updateAppointmentStatus);
+router.patch('/update-status',authenticateToken, updateAppointmentStatus);
 
 router.get('/user/:userId', getAllAppointmentsByUserId);
 router.get('/doctor/:doctorId', getAllAppointmentsByDoctorId);

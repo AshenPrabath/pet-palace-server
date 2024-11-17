@@ -27,7 +27,7 @@ const registerDoctor = async (req, res) => {
 
 const loginDoctor = async (req, res) => {
   const { email, password } = req.body;
-
+  console.log(email, password);
   try {
     const doctor = await Doctor.findOne({ email });
     if (!doctor) {
@@ -41,8 +41,8 @@ const loginDoctor = async (req, res) => {
 
     // Generate JWT
     const token = jwt.sign({ id: doctor._id, role: 'doctor' }, process.env.JWT_SECRET, { expiresIn: '1h' });
-
-    res.status(200).json({ message: 'Login successful', token });
+    console.log(token);
+    res.status(200).json({ message: 'Login successful', user_id:doctor._id,token });
   } catch (error) {
     res.status(500).json({ message: 'Error during login', error });
   }

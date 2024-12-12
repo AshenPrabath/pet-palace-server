@@ -4,39 +4,50 @@ const Doctor = require('../models/Doctor');
 const Pet = require('../models/Pet');
 const User = require('../models/User');
 const DoctorAvailability = require('../models/doctorAvailability');
+const moment = require('moment-timezone');
 
 // Get available time slots for a doctor on a specific date
 const getAvailableTimeSlots = async (doctorId, date) => {
   try {
+    // Fetch existing availability for the doctor and date
     const doctorAvailability = await DoctorAvailability.findOne({ doctor: doctorId, date });
     if (doctorAvailability) {
-      return doctorAvailability.availableSlots;  // Return available slots
+      return doctorAvailability.availableSlots; // Return saved slots
     } else {
+      // Fetch doctor details
       const doctor = await Doctor.findById(doctorId);
       if (!doctor) {
         throw new Error('Doctor not found');
       }
 
-      // If no availability data, calculate available slots based on the doctor's working hours
-      const availableSlots = [];
-      let currentTime = new Date(date);
-      currentTime.setHours(doctor.startTime.getHours(), doctor.startTime.getMinutes());
-      const endTimeDate = new Date(date);
-      endTimeDate.setHours(doctor.endTime.getHours(), doctor.endTime.getMinutes());
+      // Extract and parse times
+      const [startHour, startMinute] = doctor.startTime.split(':').map(Number);
+      const [endHour, endMinute] = doctor.endTime.split(':').map(Number);
 
-      while (currentTime < endTimeDate) {
-        availableSlots.push(currentTime.toISOString().slice(11, 16));  // format as HH:MM
+      // Create date objects using the provided date
+      const startTime = new Date(date);
+      startTime.setHours(startHour, startMinute, 0, 0); // Use local server time
+      const endTime = new Date(date);
+      endTime.setHours(endHour, endMinute, 0, 0);
+
+      // Generate time slots
+      const availableSlots = [];
+      let currentTime = new Date(startTime);
+      while (currentTime < endTime) {
+        availableSlots.push(
+          currentTime.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) // HH:MM format
+        );
         currentTime.setHours(currentTime.getHours() + 1);
       }
 
-      // Save the calculated availability to the database
+      // Save availability to the database
       const newAvailability = new DoctorAvailability({
         doctor: doctorId,
         date,
         availableSlots,
       });
-
       await newAvailability.save();
+
       return availableSlots;
     }
   } catch (error) {
@@ -45,43 +56,76 @@ const getAvailableTimeSlots = async (doctorId, date) => {
   }
 };
 
-// Create an appointment
 const createAppointment = async (req, res) => {
   const { petId, doctorId, date, timeSlot } = req.body;
-  const userId = req.user.id; // Get the authenticated user's ID from the token
+  const userId = req.user.id;
 
   try {
+    console.log('Received Data:', { petId, doctorId, date, timeSlot });
+
+    // Normalize date to the start of the day in UTC
+    const normalizedDate = new Date(date);
+    normalizedDate.setUTCHours(0, 0, 0, 0);
+    console.log('Normalized Date:', normalizedDate);
+
     // Check if the pet belongs to the authenticated user
     const pet = await Pet.findById(petId);
     if (!pet || pet.owner.toString() !== userId) {
       return res.status(403).json({ message: 'You can only create appointments for your own pets' });
     }
 
+    // Validate doctor existence
     const doctor = await Doctor.findById(doctorId);
     if (!doctor) {
       return res.status(404).json({ message: 'Doctor not found' });
     }
 
-    const availableSlots = await getAvailableTimeSlots(doctorId, date);
-    if (!availableSlots.includes(timeSlot)) {
+    // Check if the requested time slot is available
+    const doctorAvailability = await DoctorAvailability.findOne({
+      doctor: doctorId,
+      date: normalizedDate,
+    });
+    console.log('Doctor Availability:', doctorAvailability);
+
+    if (!doctorAvailability) {
+      return res.status(404).json({ message: 'Doctor availability not found for this date' });
+    }
+
+    if (!doctorAvailability.availableSlots.includes(timeSlot)) {
+      console.log(`Time slot ${timeSlot} not found in available slots:`, doctorAvailability.availableSlots);
       return res.status(400).json({ message: 'Time slot not available' });
     }
 
+    // Prevent duplicate appointments for the same time slot
+    const existingAppointment = await Appointment.findOne({
+      doctor: doctorId,
+      date: normalizedDate,
+      timeSlot,
+    });
+
+    if (existingAppointment) {
+      console.log('Existing appointment found:', existingAppointment);
+      return res.status(400).json({ message: 'Appointment already exists for this time slot' });
+    }
+
+    // Create the appointment
     const newAppointment = new Appointment({
       user: userId,
       pet: petId,
       doctor: doctorId,
-      date,
+      date: normalizedDate,
       timeSlot,
     });
 
     await newAppointment.save();
+    console.log('New appointment created:', newAppointment);
 
-    // Remove the booked time slot from doctor availability
-    await DoctorAvailability.updateOne(
-      { doctor: doctorId, date },
+    // Update doctor's availability: remove the booked slot
+    const updatedAvailability = await DoctorAvailability.updateOne(
+      { doctor: doctorId, date: normalizedDate },
       { $pull: { availableSlots: timeSlot } }
     );
+    console.log('Updated Availability Result:', updatedAvailability);
 
     res.status(201).json({ message: 'Appointment created successfully', appointment: newAppointment });
   } catch (error) {
@@ -89,6 +133,7 @@ const createAppointment = async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
+
 
 
 // Confirm or cancel an appointment (by the doctor)

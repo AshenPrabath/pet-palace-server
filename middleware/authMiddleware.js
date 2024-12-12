@@ -10,6 +10,7 @@ const authenticateToken = (req, res, next) => {
   try {
     // Verify the token and attach the decoded payload to the request object.
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    console.log("Decoded Token:", decoded);
     req.user = decoded;
     next(); // Proceed to the next middleware or route handler.
   } catch (error) {
